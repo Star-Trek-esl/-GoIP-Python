@@ -1,0 +1,218 @@
+import os
+import requests
+import re
+from bs4 import BeautifulSoup
+from datetime import datetime
+import csv
+import chardet
+import time
+
+def send_sms_and_log(phone,sms_content):
+    # URL страницы для отправки SMS
+    url = 'http://192.168.8.1/default/en_US/tools.html?type=sms'
+    # Аутентификационные данные
+    auth = ('admin', 'TUpKHML08I0Zr0J')
+    # Получаем страницу, чтобы извлечь скрытые параметры
+    response = requests.get(url, auth=auth)
+    response.raise_for_status()  # Проверка успешности запроса
+    # Извлекаем значение smskey с помощью регулярного выражения
+    smskey = re.search(r'name="smskey" value="(.*?)"', response.text).group(1)
+    # Подготовка данных для отправки SMS
+    params = {
+        'action': 'SMS',
+        'smskey': smskey,
+        'telnum': phone,
+        'smscontent': sms_content,
+        'send': 'Send'
+    }
+    # Отправляем POST-запрос для отправки SMS
+    send_sms_url = 'http://192.168.8.1/default/en_US/sms_info.html'
+    response = requests.post(send_sms_url, data=params, auth=auth)
+    response.raise_for_status()  # Проверка успешности запроса
+    # Получаем текущее время
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # Проверка результата и запись в файл
+    log_entry = f"Phone: {phone},Text: {sms_content}, Time: {current_time}, Status: "
+    if "Send successful!" in response.text:
+        log_entry += "Success"
+    else:
+        log_entry += "Failed"
+    # Создание записи для CSV файла
+    log_entry = [phone, current_time]
+    log_entry.append("Success" if "Send successful!" in response.text else "Failed")
+    # Запись данных в CSV файл
+    csv_filename = 'sms_log.csv'
+    with open(csv_filename, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow(log_entry)
+    # Проверка результата
+    if "Send successful!" in response.text:
+        print("SMS sent successfully")
+    else:
+        print("Failed to send SMS")
+    pass
+def send_ussd(ussd_command):
+    url = 'http://192.168.8.1/default/en_US/tools.html?type=ussd'
+    auth = ('admin', 'TUpKHML08I0Zr0J')
+    response = requests.get(url, auth=auth)
+    response.raise_for_status()
+    smskey = re.search(r'name="smskey" value="(.*?)"', response.text).group(1)
+    params = {
+        'action': 'USSD',
+        'smskey': smskey,
+        'telnum': ussd_command,
+        'send': 'Send'
+    }
+    send_ussd_url = 'http://192.168.8.1/default/en_US/ussd_info.html'
+    response = requests.post(send_ussd_url, data=params, auth=auth)
+    response.raise_for_status()
+    print("USSD команда успешно отправлена")
+def view_sms_table():
+    url = 'http://192.168.8.1/default/en_US/tools.html'
+    auth = ('admin', 'TUpKHML08I0Zr0J')
+    response = requests.get(url, auth=auth)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        sms_store_script = soup.find('script', string=re.compile('var sms='))
+        if sms_store_script:
+            sms_text = re.search(r'var sms=(.*);', sms_store_script.string).group(1)
+            sms_list = eval(sms_text)  # Преобразование текста в список Python
+            for sms_data in sms_list:
+                print(sms_data)
+        else:
+            print("Не удалось найти данные SMS в скрипте на странице.")
+    else:
+        print("Ошибка при получении страницы.")
+def view_sms_table_in_csv():
+    url = 'http://192.168.8.1/default/en_US/tools.html'
+    auth = ('admin', 'TUpKHML08I0Zr0J')
+    response = requests.get(url, auth=auth)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        sms_store_script = soup.find('script', string=re.compile('var sms='))
+        if sms_store_script:
+            sms_text = re.search(r'var sms=(.*);', sms_store_script.string).group(1)
+            sms_list = eval(sms_text)  # Преобразование текста в список Python
+            with open('sms_data.csv', mode='a', newline='', encoding='utf-8') as sms_file:
+                sms_writer = csv.writer(sms_file)
+                for sms_data in sms_list:
+                    date, phone_number, message = map(str.strip, sms_data.split(','))
+                    print("Дата:", date)
+                    print("Номер телефона:", phone_number)
+                    print("Сообщение:", message)
+                    write_to_csv = input("Хотите записать данные в CSV файл? (yes/no): ")
+                    if write_to_csv.lower() == 'yes':
+                        # Определение кодировки сообщения
+                        source_encoding = chardet.detect(message.encode())['encoding']
+                        # Декодирование сообщения в utf-8
+                        decoded_message = message.encode(source_encoding).decode('utf-8', 'ignore')
+                        sms_writer.writerow([date, phone_number, decoded_message])
+                        print("Данные успешно записаны в файл sms_data.csv.")
+                    else:
+                        print("Данные не были записаны в файл.")
+        else:
+            print("Не удалось найти данные SMS в скрипте на странице.")
+    else:
+        print("Ошибка при получении страницы.")
+
+def read_sms_data():
+    with open('sms_data_send.csv', mode='r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';')
+        rows = list(reader)  # Считываем все строки в список
+    with open('sms_data_send.csv', mode='w', encoding='utf-8', newline='') as file:
+        writer = csv.writer(file, delimiter=';')
+        for i, row in enumerate(rows):
+            phone, sms_content = row
+            phone = "".join([c for c in phone if ord(c) < 128])
+            sms_content = "".join([c for c in sms_content if ord(c) < 128])
+            print(phone)
+            print(sms_content)
+            send_sms_and_log(phone, sms_content)
+            time.sleep(5)
+            if i != 0:  # Пропускаем первую строку - заголовок
+                writer.writerow(row)
+
+    print("Все данные из файла sms_data_send.csv обработаны и удалены.")
+
+
+
+prev_first_row = "(1)　　　Ваши начисления за услуги связи в текущем месяце: 0.00 руб.Га"
+
+
+def check_and_save_first_row():
+    global prev_first_row
+    ussd_command = '*100#'
+
+    url = 'http://192.168.8.1/default/en_US/tools.html'
+    auth = ('admin', 'TUpKHML08I0Zr0J')
+    response = requests.get(url, auth=auth)
+
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        sms_store_script = soup.find('script', string=re.compile('var sms='))
+
+        if sms_store_script:
+            sms_text = re.search(r'var sms=(.*);', sms_store_script.string).group(1)
+            sms_list = eval(sms_text)
+            current_first_row = sms_list[2]  # Получаем текущую первую строку
+
+            if os.path.exists('sms_data.csv'):
+                with open('sms_data.csv', mode='r', encoding='utf-8') as sms_file:
+                    sms_reader = csv.reader(sms_file)
+                    last_row = None
+                    for row in sms_reader:
+                        last_row = row
+                    if last_row:
+                        prev_first_row = ','.join(last_row)
+
+            if current_first_row != prev_first_row:
+                with open('sms_data.csv', mode='a', newline='', encoding='utf-8') as sms_file:
+                    sms_writer = csv.writer(sms_file)
+                    date, phone_number, message = map(str.strip, current_first_row.split(','))
+                    source_encoding = chardet.detect(message.encode())['encoding']
+                    decoded_message = message.encode(source_encoding).decode('utf-8', 'ignore')
+                    sms_writer.writerow([date, phone_number, decoded_message])
+                    print("Строка изменена и успешно записана в файл sms_data.csv.")
+                    prev_first_row = current_first_row
+            else:
+                print("Строка осталась неизменной, данные не записаны.")
+
+        send_ussd(ussd_command)  # Отправляем USSD команду после проверки строки
+
+    else:
+        print("Ошибка при получении страницы.")
+r = 0
+def scheduled_actions():
+    global r
+    while True:
+        r += 1
+        read_sms_data()
+        time.sleep(5)
+        if r % 12 == 0:
+            r = 0
+            check_and_save_first_row()
+            time.sleep(10)
+
+
+
+# Меню выбора действий
+while True:
+    choice = input("Выберите действие:\n1. Отправка SMS c записью в файл\n2. Отправка USSD команду\n3. Просмотреть SMS BOX\n4. Записать SMS Box в файл\n5. Начать цикл по бесконечной расски смс и проверки смс почты\nВведите номер выбранного действия (или 'q' для выхода): ")
+    if choice == "1":
+        phone = input("Введите номер телефона: ")
+        sms_content = input("Введите сообщение: ")
+        send_sms_and_log(phone, sms_content)
+    elif choice == "2":
+        ussd_command = input("Введите USSD команду: ")
+        send_ussd(ussd_command)
+    elif choice == "3":
+        view_sms_table()
+    elif choice == "4":
+        view_sms_table_in_csv()
+    elif choice == "5":
+        scheduled_actions()
+    elif choice.lower() == 'q':
+        print("Программа завершена.")
+        break
+    else:
+        print("Некорректный выбор")
